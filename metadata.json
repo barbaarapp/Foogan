@@ -1,0 +1,5 @@
+{
+  "name": "Foogan App",
+  "description": "A community safety and incident reporting platform for Mogadishu, featuring real-time alerts, district risk heatmaps, and AI-powered safety insights.",
+  "requestFramePermissions": ["geolocation", "camera"]
+}

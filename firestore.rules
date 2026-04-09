@@ -1,0 +1,311 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields:
+    //   - displayName: string (required, 1-100 chars)
+    //   - email: string (required, valid email)
+    //   - photoURL: string (optional, valid URL)
+    //   - role: string (required, ['user', 'admin', 'trusted'])
+    //   - reportCount: number (required, >= 0)
+    //
+    // Collection: incidents
+    // Fields:
+    //   - type: string (required, enum)
+    //   - user: string (optional)
+    //   - uid: string (required, matches auth.uid)
+    //   - anon: bool (required)
+    //   - trusted: bool (required)
+    //   - verified: bool (required)
+    //   - district: string (required)
+    //   - timestamp: timestamp (required)
+    //   - likes: number (required, >= 0)
+    //   - img: string (optional, valid URL)
+    //   - desc: string (required, 1-2000 chars)
+    //   - location: map (optional, {lat: number, lng: number})
+    //
+    // Collection: districts
+    // Fields:
+    //   - name: string (required)
+    //   - incidents: number (required)
+    //   - risk: string (required, enum)
+    //   - trend: number (required)
+    //   - area: string (required)
+    //   - pop: number (required)
+    //   - resolved: number (required)
+    //   - active: number (required)
+    //   - desc: string (required)
+    //
+    // Collection: news
+    // Fields:
+    //   - cat: string (required, enum)
+    //   - urgent: bool (required)
+    //   - district: string (required)
+    //   - timestamp: timestamp (required)
+    //   - reads: number (required)
+    //   - likes: number (required)
+    //   - title: string (required, 1-200 chars)
+    //   - content: string (required)
+    //   - img: string (optional)
+    //
+    // Collection: polls
+    // Fields:
+    //   - q: string (required)
+    //   - en: string (optional)
+    //   - opts: list (required, [{l: string, v: number}])
+    //   - total: number (required)
+    //   - active: bool (required)
+    //   - timestamp: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "barbaaryp@gmail.com" ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*") || url.matches("^data:image/.*"));
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['displayName', 'email', 'role', 'reportCount']) &&
+             hasOnlyAllowedFields(['displayName', 'email', 'photoURL', 'role', 'reportCount', 'sosContacts']) &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100 &&
+             isValidEmail(data.email) &&
+             data.role in ['user', 'admin', 'trusted'] &&
+             data.reportCount is number && data.reportCount >= 0 &&
+             (!('photoURL' in data) || data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 500)) &&
+             (!('sosContacts' in data) || data.sosContacts is list);
+    }
+
+    function isValidNotification(data) {
+      return hasRequiredFields(['toEmail', 'fromName', 'type', 'timestamp']) &&
+             isValidEmail(data.toEmail) &&
+             data.fromName is string &&
+             data.type in ['sos', 'alert'] &&
+             data.timestamp is timestamp &&
+             (!('read' in data) || data.read is bool);
+    }
+
+    function isValidIncident(data) {
+      return hasRequiredFields(['type', 'uid', 'anon', 'trusted', 'verified', 'solved', 'district', 'timestamp', 'desc']) &&
+             hasOnlyAllowedFields(['type', 'user', 'uid', 'anon', 'trusted', 'verified', 'solved', 'district', 'timestamp', 'likes', 'img', 'desc', 'location', 'notes', 'watchers', 'confirms']) &&
+             data.type in ['armed', 'robbery', 'suspicious', 'disorder', 'hazard', 'welfare'] &&
+             (data.uid == request.auth.uid || isAdmin()) &&
+             data.anon is bool &&
+             data.trusted is bool &&
+             data.verified is bool &&
+             data.solved is bool &&
+             data.district is string && data.district.size() > 0 && data.district.size() <= 50 &&
+             data.timestamp is timestamp &&
+             data.desc is string && data.desc.size() > 0 && data.desc.size() <= 2000 &&
+             (!('likes' in data) || data.likes is number) &&
+             (!('img' in data) || data.img == null || (isValidUrl(data.img) && data.img.size() <= 1048576)) &&
+             (!('user' in data) || data.user == null || (data.user is string && data.user.size() <= 100)) &&
+             (!('notes' in data) || data.notes is list) &&
+             (!('watchers' in data) || data.watchers is list) &&
+             (!('confirms' in data) || data.confirms is list);
+    }
+
+    function isValidGeofence(data) {
+      return hasRequiredFields(['uid', 'name', 'lat', 'lng', 'radius']) &&
+             data.uid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.lat is number && data.lng is number &&
+             data.radius is number && data.radius > 0 && data.radius <= 10000;
+    }
+
+    function isValidSOSSignal(data) {
+      return hasRequiredFields(['uid', 'lat', 'lng', 'timestamp']) &&
+             data.uid == request.auth.uid &&
+             data.lat is number && data.lng is number &&
+             data.timestamp is timestamp &&
+             (!('status' in data) || data.status in ['active', 'resolved']) &&
+             (!('contactEmails' in data) || data.contactEmails is list);
+    }
+
+    function isValidDistrict(data) {
+      return hasRequiredFields(['name', 'incidents', 'risk', 'trend', 'area', 'pop', 'resolved', 'active', 'desc']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 50 &&
+             data.area is string && data.area.size() > 0 && data.area.size() <= 50 &&
+             data.desc is string && data.desc.size() > 0 && data.desc.size() <= 1000 &&
+             data.risk in ['critical', 'high', 'medium', 'low'] &&
+             data.incidents is number && data.trend is number && data.pop is number &&
+             data.resolved is number && data.active is number;
+    }
+
+    function isValidNews(data) {
+      return hasRequiredFields(['cat', 'urgent', 'district', 'timestamp', 'reads', 'likes', 'title', 'content']) &&
+             hasOnlyAllowedFields(['cat', 'urgent', 'district', 'timestamp', 'reads', 'likes', 'title', 'content', 'img']) &&
+             data.cat in ['ALERT', 'UPDATE', 'COMMUNITY', 'NOTICE'] &&
+             data.district is string && data.district.size() > 0 && data.district.size() <= 50 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.content is string && data.content.size() > 0 && data.content.size() <= 10000 &&
+             data.likes is number && data.likes >= 0 &&
+             data.reads is number && data.reads >= 0 &&
+             data.urgent is bool &&
+             data.timestamp is timestamp;
+    }
+
+    function isValidPoll(data) {
+      return hasRequiredFields(['q', 'opts', 'total', 'active', 'timestamp']) &&
+             data.q is string && data.q.size() > 0 && data.q.size() <= 500 &&
+             data.opts is list && data.opts.size() > 0 && data.opts.size() <= 10 &&
+             data.total is number && data.total >= 0 &&
+             data.active is bool &&
+             data.timestamp is timestamp;
+    }
+
+    function isValidLiveAlert(data) {
+      return hasRequiredFields(['title', 'content', 'timestamp', 'active']) &&
+             hasOnlyAllowedFields(['title', 'content', 'timestamp', 'active', 'pinned', 'district', 'type']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.content is string && data.content.size() > 0 && data.content.size() <= 2000 &&
+             data.timestamp is timestamp &&
+             data.active is bool &&
+             (!('pinned' in data) || data.pinned is bool) &&
+             (!('district' in data) || data.district is string) &&
+             (!('type' in data) || data.type in ['SECURITY', 'TRAFFIC', 'WEATHER', 'OTHER']);
+    }
+
+    function isValidMessage(data) {
+      return hasRequiredFields(['text', 'uid', 'user', 'timestamp']) &&
+             hasOnlyAllowedFields(['text', 'uid', 'user', 'photo', 'timestamp']) &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 500 &&
+             data.uid == request.auth.uid &&
+             data.user is string &&
+             data.timestamp is timestamp &&
+             (!('photo' in data) || data.photo == null || data.photo is string);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Users can only read their own profile (contains PII like email)
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Create: User can create their own profile with 'user' role
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'user' || isAdmin());
+      
+      // Update: User can update their own profile but cannot change their role
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /incidents/{incidentId} {
+      // Public read for citizens
+      allow read: if true;
+      
+      // Create: Any authenticated user can report an incident
+      allow create: if isAuthenticated() && isValidIncident(request.resource.data);
+      
+      // Update: Only owner or admin can update. Authenticated users can increment likes, add community notes, watch or confirm.
+      allow update: if (isOwner(resource.data.uid) && isValidIncident(request.resource.data)) || 
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']) && request.resource.data.likes == resource.data.likes + 1) ||
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']) && request.resource.data.notes.size() == resource.data.notes.size() + 1) ||
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['watchers']) && request.resource.data.watchers.size() == resource.data.watchers.size() + 1 && request.auth.uid in request.resource.data.watchers) ||
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirms']) && request.resource.data.confirms.size() == resource.data.confirms.size() + 1 && request.auth.uid in request.resource.data.confirms) ||
+                       (isAdmin() && isValidIncident(request.resource.data));
+    }
+
+    match /districts/{districtId} {
+      // Public read for citizens
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /news/{newsId} {
+      // Public read for citizens
+      allow read: if true;
+      
+      // Update: Authenticated users can increment likes
+      allow update: if (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']) && 
+                        request.resource.data.likes == resource.data.likes + 1) ||
+                       isAdmin();
+      
+      allow create, delete: if isAdmin();
+    }
+
+    match /polls/{pollId} {
+      // Public read for citizens
+      allow read: if true;
+      
+      allow create, delete: if isAdmin();
+      
+      // Allow users to vote (increment total and an option's v)
+      allow update: if isAuthenticated() && (isAdmin() || (isValidPoll(request.resource.data) && request.resource.data.total == resource.data.total + 1));
+    }
+
+    match /messages/{messageId} {
+      // Chat is for authenticated users only
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidMessage(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /live_alerts/{alertId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidLiveAlert(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /geofences/{geofenceId} {
+      allow read, delete: if isOwner(resource.data.uid);
+      allow create: if isAuthenticated() && isValidGeofence(request.resource.data);
+      allow update: if isOwner(resource.data.uid) && isValidGeofence(request.resource.data);
+    }
+
+    match /sos_signals/{signalId} {
+      allow read: if isOwner(resource.data.uid) || 
+                  (isAuthenticated() && request.auth.token.email.lower() in resource.data.contactEmails);
+      allow create: if isAuthenticated() && isValidSOSSignal(request.resource.data);
+      allow update: if isOwner(resource.data.uid) && isValidSOSSignal(request.resource.data);
+    }
+
+    match /notifications/{notifId} {
+      // Users can read notifications sent to their email
+      allow read: if isAuthenticated() && request.auth.token.email.lower() == resource.data.toEmail.lower();
+      // Users can create notifications (for SOS)
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data);
+      // Users can mark their own notifications as read
+      allow update: if isAuthenticated() && request.auth.token.email.lower() == resource.data.toEmail.lower() && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+    }
+  }
+}
