@@ -1,0 +1,245 @@
+{
+  "entities": {
+    "Incident": {
+      "title": "Incident",
+      "description": "A safety incident reported by a community member.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "description": "The category of the incident (e.g., armed, robbery, suspicious)." },
+        "user": { "type": "string", "description": "The name of the reporter, or null if anonymous." },
+        "uid": { "type": "string", "description": "The unique ID of the reporter." },
+        "anon": { "type": "boolean", "description": "Whether the report is anonymous." },
+        "trusted": { "type": "boolean", "description": "Whether the reporter is a trusted member." },
+        "verified": { "type": "boolean", "description": "Whether the incident has been verified by authorities." },
+        "solved": { "type": "boolean", "description": "Whether the incident has been resolved." },
+        "district": { "type": "string", "description": "The name of the district where the incident occurred." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the incident was reported." },
+        "likes": { "type": "number", "description": "Number of community confirmations/likes." },
+        "img": { "type": "string", "description": "URL to an attached image, if any." },
+        "desc": { "type": "string", "description": "Detailed description of the incident." },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": { "type": "string" },
+              "user": { "type": "string" },
+              "uid": { "type": "string" },
+              "timestamp": { "type": "string", "format": "date-time" }
+            }
+          },
+          "description": "Community notes or updates added to the incident."
+        },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        }
+      },
+      "required": ["type", "uid", "district", "timestamp", "desc"]
+    },
+    "District": {
+      "title": "District",
+      "description": "Statistics and safety information for a specific district.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "incidents": { "type": "number" },
+        "trend": { "type": "number" },
+        "risk": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+        "area": { "type": "string" },
+        "pop": { "type": "number" },
+        "resolved": { "type": "number" },
+        "active": { "type": "number" },
+        "desc": { "type": "string" }
+      },
+      "required": ["name", "incidents", "risk"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A registered user of the Foogan platform.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin", "trusted"] },
+        "reportCount": { "type": "number" },
+        "sosContacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "email": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["displayName", "email", "role"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "An in-app alert for a user.",
+      "type": "object",
+      "properties": {
+        "toEmail": { "type": "string" },
+        "fromName": { "type": "string" },
+        "fromUid": { "type": "string" },
+        "type": { "type": "string", "enum": ["sos", "alert"] },
+        "signalId": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["toEmail", "fromName", "type", "timestamp"]
+    },
+    "News": {
+      "title": "News",
+      "description": "Official safety updates and announcements.",
+      "type": "object",
+      "properties": {
+        "cat": { "type": "string", "enum": ["ALERT", "UPDATE", "COMMUNITY", "NOTICE"] },
+        "urgent": { "type": "boolean" },
+        "district": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "reads": { "type": "number" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "img": { "type": "string" },
+        "likes": { "type": "number" }
+      },
+      "required": ["cat", "title", "timestamp"]
+    },
+    "Poll": {
+      "title": "Poll",
+      "description": "Community polls.",
+      "type": "object",
+      "properties": {
+        "q": { "type": "string", "description": "The question in Somali." },
+        "en": { "type": "string", "description": "The question in English." },
+        "opts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "l": { "type": "string", "description": "Option label." },
+              "v": { "type": "number", "description": "Vote count." }
+            }
+          }
+        },
+        "total": { "type": "number" },
+        "active": { "type": "boolean" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["q", "opts", "total", "active"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Community chat messages.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "uid": { "type": "string" },
+        "user": { "type": "string" },
+        "photo": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "uid", "user", "timestamp"]
+    },
+    "LiveAlert": {
+      "title": "Live Alert",
+      "description": "Official real-time alerts from admins.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "active": { "type": "boolean" },
+        "pinned": { "type": "boolean" },
+        "district": { "type": "string" },
+        "type": { "type": "string", "enum": ["SECURITY", "TRAFFIC", "WEATHER", "OTHER"] }
+      },
+      "required": ["title", "content", "timestamp", "active"]
+    },
+    "Geofence": {
+      "title": "Geofence",
+      "description": "A user-defined radius for safety alerts.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string", "description": "Label for the geofence (e.g., Home, School)." },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "radius": { "type": "number", "description": "Radius in meters." },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "lat", "lng", "radius"]
+    },
+    "SOSSignal": {
+      "title": "SOS Signal",
+      "description": "An emergency signal sent by a user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "user": { "type": "string" },
+        "email": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "resolved"] },
+        "contactEmails": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "lastUpdate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "lat", "lng", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/incidents/{incidentId}": {
+      "schema": "Incident",
+      "description": "Collection of all reported incidents."
+    },
+    "/districts/{districtId}": {
+      "schema": "District",
+      "description": "Safety statistics for each district."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile data."
+    },
+    "/news/{newsId}": {
+      "schema": "News",
+      "description": "Official news and alerts."
+    },
+    "/polls/{pollId}": {
+      "schema": "Poll",
+      "description": "Community polls."
+    },
+    "/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Community chat messages."
+    },
+    "/live_alerts/{alertId}": {
+      "schema": "LiveAlert",
+      "description": "Official real-time alerts."
+    },
+    "/geofences/{geofenceId}": {
+      "schema": "Geofence",
+      "description": "User-defined safety zones."
+    },
+    "/sos_signals/{signalId}": {
+      "schema": "SOSSignal",
+      "description": "Emergency SOS signals."
+    },
+    "/notifications/{notifId}": {
+      "schema": "Notification",
+      "description": "In-app notifications for SOS and other alerts."
+    }
+  }
+}

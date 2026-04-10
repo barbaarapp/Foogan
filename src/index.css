@@ -1,0 +1,22 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+@keyframes pulse-marker {
+  0% { fill-opacity: 0.4; stroke-opacity: 0.4; }
+  50% { fill-opacity: 0.9; stroke-opacity: 0.9; }
+  100% { fill-opacity: 0.4; stroke-opacity: 0.4; }
+}
+
+.pulse-marker {
+  animation: pulse-marker 1.5s ease-in-out infinite;
+}
+
+.markdown-body {
+  font-family: inherit;
+}
