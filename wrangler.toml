@@ -1,3 +1,15 @@
 name = "foogan"
+main = "src/worker.ts"
 compatibility_date = "2024-04-26"
-pages_build_output_dir = "dist"
+route = "foogan.foogan.workers.dev/*"
+
+[build]
+command = "npm run build"
+cwd = "."
+
+[build.upload]
+format = "modules"
+main = "./dist/worker.js"
+
+[env.production]
+routes = [{pattern = "foogan.foogan.workers.dev/*", zone_id = ""}]
