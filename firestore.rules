@@ -1,0 +1,438 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields:
+    //   - displayName: string (required, 1-100 chars)
+    //   - email: string (required, valid email)
+    //   - photoURL: string (optional, valid URL)
+    //   - role: string (required, ['user', 'admin', 'trusted'])
+    //   - reportCount: number (required, >= 0)
+    //
+    // Collection: incidents
+    // Fields:
+    //   - type: string (required, enum)
+    //   - user: string (optional)
+    //   - uid: string (required, matches auth.uid)
+    //   - anon: bool (required)
+    //   - trusted: bool (required)
+    //   - verified: bool (required)
+    //   - district: string (required)
+    //   - timestamp: timestamp (required)
+    //   - likes: number (required, >= 0)
+    //   - img: string (optional, valid URL)
+    //   - desc: string (required, 1-2000 chars)
+    //   - location: map (optional, {lat: number, lng: number})
+    //
+    // Collection: districts
+    // Fields:
+    //   - name: string (required)
+    //   - incidents: number (required)
+    //   - risk: string (required, enum)
+    //   - trend: number (required)
+    //   - area: string (required)
+    //   - pop: number (required)
+    //   - resolved: number (required)
+    //   - active: number (required)
+    //   - desc: string (required)
+    //
+    // Collection: news
+    // Fields:
+    //   - cat: string (required, enum)
+    //   - urgent: bool (required)
+    //   - district: string (required)
+    //   - timestamp: timestamp (required)
+    //   - reads: number (required)
+    //   - likes: number (required)
+    //   - title: string (required, 1-200 chars)
+    //   - content: string (required)
+    //   - img: string (optional)
+    //
+    // Collection: polls
+    // Fields:
+    //   - q: string (required)
+    //   - en: string (optional)
+    //   - opts: list (required, [{l: string, v: number}])
+    //   - total: number (required)
+    //   - active: bool (required)
+    //   - timestamp: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email != null && request.auth.token.email.toLower() == "barbaaryp@gmail.com") ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        (request.auth.token.email != null && exists(/databases/$(database)/documents/team_members/$(request.auth.token.email.toLower())) && (get(/databases/$(database)/documents/team_members/$(request.auth.token.email.toLower())).data.role == 'admin'))
+      );
+    }
+
+    function isEditor() {
+      return isAdmin() || 
+             (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+              (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor' || 
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'district_admin')) ||
+             (isAuthenticated() && request.auth.token.email != null && exists(/databases/$(database)/documents/team_members/$(request.auth.token.email.toLower())) && 
+              (get(/databases/$(database)/documents/team_members/$(request.auth.token.email.toLower())).data.role == 'editor' || 
+               get(/databases/$(database)/documents/team_members/$(request.auth.token.email.toLower())).data.role == 'district_admin'));
+    }
+
+    function isDistrictAdmin(district) {
+      return isAuthenticated() && (
+        isAdmin() ||
+        (request.auth.token.email != null && exists(/databases/$(database)/documents/team_members/$(request.auth.token.email.toLower())) && 
+         get(/databases/$(database)/documents/team_members/$(request.auth.token.email.toLower())).data.assignedDistrict == district) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'district_admin' && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.homeDistrict == district)
+      );
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*") || url.matches("^data:image/.*"));
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['displayName', 'email', 'role', 'reportCount']) &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100 &&
+             isValidEmail(data.email) &&
+             data.role in ['user', 'admin', 'editor', 'trusted', 'district_admin'] &&
+             data.reportCount is number && data.reportCount >= 0 &&
+             (!('photoURL' in data) || data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 500)) &&
+             (!('sosContacts' in data) || data.sosContacts is list) &&
+             (!('isVolunteer' in data) || data.isVolunteer is bool) &&
+             (!('volunteerBloodType' in data) || data.volunteerBloodType == null || (data.volunteerBloodType is string && data.volunteerBloodType.size() <= 5)) &&
+             (!('homeDistrict' in data) || data.homeDistrict == null || data.homeDistrict is string);
+    }
+
+    function isValidNotification(data) {
+      return hasRequiredFields(['toEmail', 'fromName', 'type', 'timestamp']) &&
+             isValidEmail(data.toEmail) &&
+             data.fromName is string &&
+             data.type in ['sos', 'alert', 'buddy_request'] &&
+             (data.timestamp is timestamp || data.timestamp is map) &&
+             (!('read' in data) || data.read is bool) &&
+             (!('lat' in data) || data.lat is number) &&
+             (!('lng' in data) || data.lng is number) &&
+             (!('district' in data) || data.district is string) &&
+             (!('requestId' in data) || data.requestId is string) &&
+             (!('fromUid' in data) || data.fromUid is string) &&
+             (!('incidentId' in data) || data.incidentId is string) &&
+             (!('title' in data) || data.title is string) &&
+             (!('body' in data) || data.body is string);
+    }
+
+    function isValidIncident(data) {
+      return hasRequiredFields(['type', 'uid', 'anon', 'trusted', 'verified', 'solved', 'district', 'timestamp', 'desc']) &&
+             data.type in ['security', 'injustice', 'hazards', 'welfare', 'health', 'market'] &&
+             (data.uid == request.auth.uid || isAdmin() || isDistrictAdmin(data.district)) &&
+             data.anon is bool &&
+             data.trusted is bool &&
+             data.verified is bool &&
+             data.solved is bool &&
+             data.district is string && data.district.size() > 0 && data.district.size() <= 60 &&
+             (data.timestamp is timestamp || data.timestamp is map || data.timestamp is string) &&
+             data.desc is string && data.desc.size() > 0 && data.desc.size() <= 3000 &&
+             (!('likes' in data) || data.likes is number) &&
+             (!('reads' in data) || data.reads is number) &&
+             (!('img' in data) || data.img == null || data.img == "" || (isValidUrl(data.img) && data.img.size() <= 1500000)) &&
+             (!('user' in data) || data.user == null || (data.user is string && data.user.size() <= 100)) &&
+             (!('location' in data) || data.location is map) &&
+             (!('notes' in data) || data.notes is list) &&
+             (!('watchers' in data) || data.watchers is list) &&
+             (!('confirms' in data) || data.confirms is list) &&
+             (!('bloodType' in data) || data.bloodType == null || data.bloodType == "" || (data.bloodType is string && data.bloodType.size() <= 10)) &&
+             (!('acceptedBy' in data) || data.acceptedBy == null || data.acceptedBy is string) &&
+             (!('acceptedByName' in data) || data.acceptedByName == null || data.acceptedByName is string) &&
+             (!('email' in data) || data.email == null || data.email == "" || isValidEmail(data.email)) &&
+             (!('status' in data) || data.status in ['reported', 'seen', 'processing', 'resolved']) &&
+             (!('adminNote' in data) || data.adminNote == null || (data.adminNote is string && data.adminNote.size() <= 1000)) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt is map);
+    }
+
+    function isValidGeofence(data) {
+      return hasRequiredFields(['uid', 'name', 'lat', 'lng', 'radius']) &&
+             data.uid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.lat is number && data.lng is number &&
+             data.radius is number && data.radius > 0 && data.radius <= 10000;
+    }
+
+    function isValidSOSSignal(data) {
+      return hasRequiredFields(['uid', 'lat', 'lng', 'timestamp']) &&
+             data.uid == request.auth.uid &&
+             data.lat is number && data.lng is number &&
+             data.timestamp is timestamp &&
+             (!('status' in data) || data.status in ['active', 'resolved']) &&
+             (!('contactEmails' in data) || data.contactEmails is list);
+    }
+
+    function isValidDistrict(data) {
+      return hasRequiredFields(['name', 'incidents', 'risk', 'trend', 'area', 'pop', 'resolved', 'active', 'desc']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 50 &&
+             data.area is string && data.area.size() > 0 && data.area.size() <= 50 &&
+             data.desc is string && data.desc.size() > 0 && data.desc.size() <= 1000 &&
+             data.risk in ['critical', 'high', 'medium', 'low'] &&
+             data.incidents is number && data.trend is number && data.pop is number &&
+             data.resolved is number && data.active is number;
+    }
+
+    function isValidNews(data) {
+      return hasRequiredFields(['cat', 'urgent', 'district', 'timestamp', 'reads', 'likes', 'title', 'content']) &&
+             hasOnlyAllowedFields(['cat', 'urgent', 'district', 'timestamp', 'reads', 'likes', 'title', 'content', 'img']) &&
+             data.cat in ['ALERT', 'UPDATE', 'COMMUNITY', 'NOTICE'] &&
+             data.district is string && data.district.size() > 0 && data.district.size() <= 50 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.content is string && data.content.size() > 0 && data.content.size() <= 10000 &&
+             data.likes is number && data.likes >= 0 &&
+             data.reads is number && data.reads >= 0 &&
+             data.urgent is bool &&
+             (data.timestamp is timestamp || data.timestamp is map);
+    }
+
+    function isValidPoll(data) {
+      return hasRequiredFields(['q', 'opts', 'total', 'active', 'timestamp']) &&
+             data.q is string && data.q.size() > 0 && data.q.size() <= 500 &&
+             data.opts is list && data.opts.size() > 0 && data.opts.size() <= 10 &&
+             data.total is number && data.total >= 0 &&
+             data.active is bool &&
+             (data.timestamp is timestamp || data.timestamp is map) &&
+             (!('voters' in data) || data.voters is list);
+    }
+
+    function isValidLiveAlert(data) {
+      return hasRequiredFields(['title', 'content', 'timestamp', 'active']) &&
+             hasOnlyAllowedFields(['title', 'content', 'timestamp', 'active', 'pinned', 'district', 'type', 'reads']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.content is string && data.content.size() > 0 && data.content.size() <= 2000 &&
+             data.timestamp is timestamp &&
+             data.active is bool &&
+             (!('reads' in data) || data.reads is number) &&
+             (!('pinned' in data) || data.pinned is bool) &&
+             (!('district' in data) || data.district is string) &&
+             (!('type' in data) || data.type in ['SECURITY', 'TRAFFIC', 'WEATHER', 'OTHER']);
+    }
+
+    function isValidMessage(data) {
+      return hasRequiredFields(['text', 'uid', 'user', 'timestamp']) &&
+             hasOnlyAllowedFields(['text', 'uid', 'user', 'photo', 'timestamp']) &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 500 &&
+             data.uid == request.auth.uid &&
+             data.user is string &&
+             (data.timestamp is timestamp || data.timestamp is map) &&
+             (!('photo' in data) || data.photo == null || data.photo is string);
+    }
+
+    function isValidSponsor(data) {
+      return hasRequiredFields(['name', 'message', 'active', 'timestamp']) &&
+             hasOnlyAllowedFields(['name', 'logo', 'message', 'link', 'active', 'timestamp']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.message is string && data.message.size() > 0 && data.message.size() <= 500 &&
+             data.active is bool &&
+             (data.timestamp is timestamp || data.timestamp is map) &&
+             (!('logo' in data) || data.logo == null || isValidUrl(data.logo)) &&
+             (!('link' in data) || data.link == null || isValidUrl(data.link));
+    }
+
+    function isValidBuddyRequest(data) {
+      return hasRequiredFields(['uid', 'buddyEmail', 'district', 'status', 'timestamp']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.buddyEmail) &&
+             data.status in ['pending', 'active', 'completed', 'rejected'] &&
+             (data.timestamp is timestamp || data.timestamp is map) &&
+             (!('expiresAt' in data) || data.expiresAt is timestamp || data.expiresAt is map) &&
+             (!('lastPulseAt' in data) || data.lastPulseAt is timestamp || data.lastPulseAt is map) &&
+             (!('pulses' in data) || data.pulses is number) &&
+             (!('lat' in data) || data.lat is number) &&
+             (!('lng' in data) || data.lng is number) &&
+             (!('duration' in data) || data.duration is number) &&
+             (!('userName' in data) || data.userName is string) &&
+             (!('buddyName' in data) || data.buddyName is string) &&
+             (!('buddyUid' in data) || data.buddyUid is string);
+    }
+
+     function isValidTeamMember(data) {
+      return hasRequiredFields(['email', 'role', 'addedBy', 'timestamp']) &&
+             isValidEmail(data.email) &&
+             data.role in ['admin', 'editor', 'district_admin'] &&
+             data.addedBy is string &&
+             (data.timestamp is timestamp || data.timestamp is map) &&
+             (!('assignedDistrict' in data) || data.assignedDistrict == null || (data.assignedDistrict is string && data.assignedDistrict.size() <= 100));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Users can only read their own profile (contains PII like email)
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Create: User can create their own profile with 'user' role
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'user' || isAdmin());
+      
+      // Update: User can update their own profile but cannot change their role unless authorized
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || 
+                     isAdmin() ||
+                     (exists(/databases/$(database)/documents/team_members/$(request.auth.token.email.toLower())) && 
+                      get(/databases/$(database)/documents/team_members/$(request.auth.token.email.toLower())).data.role == request.resource.data.role));
+    }
+
+    match /incidents/{incidentId} {
+      // Public read for citizens
+      allow read: if true;
+      
+      // Create: Any authenticated user can report an incident
+      allow create: if isAuthenticated() && isValidIncident(request.resource.data);
+      
+      // Update: Only owner or admin or district admin can update.
+      allow update: if (isOwner(resource.data.uid) && isValidIncident(request.resource.data) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'adminNote'])) || 
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']) && request.resource.data.likes == resource.data.likes + 1) ||
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reads']) && request.resource.data.reads == (resource.data.reads ? resource.data.reads : 0) + 1) ||
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']) && request.resource.data.notes.size() == resource.data.notes.size() + 1) ||
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['watchers']) && request.resource.data.watchers.size() == resource.data.watchers.size() + 1 && request.auth.uid in request.resource.data.watchers) ||
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirms']) && request.resource.data.confirms.size() == resource.data.confirms.size() + 1 && request.auth.uid in request.resource.data.confirms) ||
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acceptedBy', 'acceptedByName']) && resource.data.acceptedBy == null && request.resource.data.acceptedBy == request.auth.uid) ||
+                       (isAdmin()) || 
+                       (isDistrictAdmin(resource.data.district) && isValidIncident(request.resource.data) && 
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'adminNote', 'solved', 'updatedAt']));
+
+      // Delete: Only owner or admin can delete
+      allow delete: if isOwner(resource.data.uid) || isAdmin();
+    }
+
+    match /districts/{districtId} {
+      // Public read for citizens
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /news/{newsId} {
+      // Public read for citizens
+      allow read: if true;
+      
+      // Update: Authenticated users can increment likes or reads
+      allow update: if (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']) && 
+                        request.resource.data.likes == resource.data.likes + 1) ||
+                       (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reads']) && 
+                        request.resource.data.reads == (resource.data.reads ? resource.data.reads : 0) + 1) ||
+                       isEditor();
+      
+      allow create, delete: if isEditor();
+    }
+
+    match /polls/{pollId} {
+      // Public read for citizens
+      allow read: if true;
+      
+      allow create, delete: if isEditor();
+      
+      // Allow users to vote (increment total and an option's v, and add uid to voters)
+      allow update: if isAuthenticated() && (isEditor() || (isValidPoll(request.resource.data) && 
+                                                           request.resource.data.total == resource.data.total + 1 &&
+                                                           request.auth.uid in request.resource.data.voters &&
+                                                           !(request.auth.uid in resource.data.voters)));
+    }
+
+    match /messages/{messageId} {
+      // Chat is for authenticated users only
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidMessage(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /live_alerts/{alertId} {
+      allow read: if true;
+      allow create, update: if isEditor() && isValidLiveAlert(request.resource.data);
+      allow update: if isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reads']) && request.resource.data.reads == (resource.data.reads ? resource.data.reads : 0) + 1;
+      allow delete: if isEditor();
+    }
+
+    match /geofences/{geofenceId} {
+      allow read, delete: if isOwner(resource.data.uid) || isAdmin();
+      allow create: if isAuthenticated() && isValidGeofence(request.resource.data);
+      allow update: if (isOwner(resource.data.uid) || isAdmin()) && isValidGeofence(request.resource.data);
+    }
+
+    match /sos_signals/{signalId} {
+      allow read: if isOwner(resource.data.uid) || isAdmin() ||
+                  (isAuthenticated() && request.auth.token.email.toLower() in resource.data.contactEmails);
+      allow create: if isAuthenticated() && isValidSOSSignal(request.resource.data);
+      allow update: if (isOwner(resource.data.uid) && isValidSOSSignal(request.resource.data)) ||
+                       isAdmin() ||
+                       (isAuthenticated() && request.auth.token.email.toLower() in resource.data.contactEmails && 
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                        request.resource.data.status == 'resolved');
+    }
+
+    match /notifications/{notifId} {
+      // Users can read notifications sent to their email
+      allow read: if (isAuthenticated() && request.auth.token.email.toLower() == resource.data.toEmail.toLower()) || isAdmin();
+      // Users can create notifications (for SOS)
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data);
+      // Users can mark their own notifications as read
+      allow update: if (isAuthenticated() && request.auth.token.email.toLower() == resource.data.toEmail.toLower() && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])) || isAdmin();
+    }
+
+    match /sponsors/{sponsorId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidSponsor(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /buddy_requests/{requestId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.uid || request.auth.uid == resource.data.buddyUid || request.auth.token.email.toLower() == resource.data.buddyEmail.toLower() || isAdmin());
+      allow create: if isAuthenticated() && isValidBuddyRequest(request.resource.data);
+      allow update: if (isAuthenticated() && (
+        (request.auth.uid == resource.data.uid && isValidBuddyRequest(request.resource.data)) ||
+        (request.auth.token.email.toLower() == resource.data.buddyEmail.toLower() && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'buddyUid', 'buddyName']) ||
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pulses', 'lastPulseAt'])
+        ))
+      )) || isAdmin();
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.uid || isAdmin());
+    }
+
+    match /team_members/{email} {
+      // Admins can manage team members
+      allow read, write: if isAdmin() && (request.method != 'create' || isValidTeamMember(request.resource.data));
+      // Individual users can read their own entry to sync their role
+      allow read: if isAuthenticated() && request.auth.token.email.toLower() == email.toLower();
+    }
+  }
+}

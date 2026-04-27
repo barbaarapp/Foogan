@@ -1,0 +1,5 @@
+{
+  "name": "Foogan",
+  "description": "A community safety and incident reporting platform featuring real-time alerts, district risk heatmaps, and AI-powered safety insights.",
+  "requestFramePermissions": ["geolocation", "camera"]
+}
