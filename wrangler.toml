@@ -5,4 +5,7 @@ workers_dev = true
 
 [build]
 command = "npm run build"
-cwd = "."
+
+[assets]
+directory = "dist"
+binding = "__STATIC_CONTENT"

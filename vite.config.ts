@@ -21,14 +21,15 @@ export default defineConfig(({mode}) => {
       hmr: process.env.DISABLE_HMR !== 'true',
     },
     build: {
-      lib: {
-        entry: 'src/worker.ts',
-        name: 'foogan',
-        fileName: 'worker',
-        formats: ['es'],
-      },
+      outDir: 'dist',
+      emptyOutDir: true,
       rollupOptions: {
-        external: ['wrangler'],
+        input: 'index.html',
+        output: {
+          entryFileNames: 'assets/[name]-[hash].js',
+          chunkFileNames: 'assets/[name]-[hash].js',
+          assetFileNames: 'assets/[name]-[hash][extname]',
+        },
       },
     },
   };
