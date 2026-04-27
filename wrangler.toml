@@ -3,9 +3,6 @@ main = "src/worker.ts"
 compatibility_date = "2024-04-26"
 workers_dev = true
 
-[build]
-command = "npm run build"
-
 [assets]
 directory = "dist"
 binding = "__STATIC_CONTENT"
