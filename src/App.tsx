@@ -3159,6 +3159,25 @@ function NotificationToast({ msg, onClose }: { msg: any, onClose: () => void }) 
 function SOSButton({ user, userPos, contacts = [], activeId, onActiveId }: { user: any, userPos: any, contacts: any[], activeId: string | null, onActiveId?: (id: string | null) => void }) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  
+  // Guard: Don't allow SOS without location
+  if (!userPos || typeof userPos.lat !== 'number' || typeof userPos.lng !== 'number') {
+    return (
+      <button disabled style={{ 
+        padding: "12px 16px", 
+        background: "#999", 
+        color: "white", 
+        border: "none", 
+        borderRadius: 8, 
+        fontSize: 13, 
+        fontWeight: 700,
+        cursor: "not-allowed",
+        opacity: 0.6
+      }}>
+        🚨 SOS (Location required)
+      </button>
+    );
+  }
 
   const handleSOS = async () => {
     if (!user || !userPos) {
@@ -5395,9 +5414,22 @@ function AppContent() {
     // Get user location (Real-time)
     let watchId: number | null = null;
     if (navigator.geolocation) {
-      watchId = navigator.geolocation.watchPosition((pos) => {
-        setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      }, (err) => console.warn("Location access denied"), { enableHighAccuracy: true });
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        }, 
+        (err) => {
+          console.warn("Location access denied or unavailable:", err.message);
+          // Fallback: Use Mogadishu city center as default
+          if (!userPos) {
+            setUserPos({ lat: 2.0469, lng: 45.3182 });
+          }
+        }, 
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      );
+    } else {
+      // Geolocation not supported - use default Mogadishu location
+      setUserPos({ lat: 2.0469, lng: 45.3182 });
     }
 
     return () => { 
